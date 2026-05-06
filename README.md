@@ -1,6 +1,6 @@
 # File Processing and Google Drive Upload Automation
 
-This script recursively scans a local folder, renames supported files using the folder hierarchy, uploads them to Google Drive, makes each file publicly viewable, and writes an Excel index of successful uploads.
+This script recursively scans a local folder, mirrors the same folder hierarchy in Google Drive, uploads supported files into the matching Drive folders, makes each file publicly viewable, and writes an Excel index of successful uploads.
 
 ## Supported Files
 
@@ -68,5 +68,7 @@ Optional environment variables:
 
 - The first run opens a local browser flow for OAuth login.
 - Uploaded files are shared as "Anyone with the link can view".
+- The script creates a top-level Drive folder named after `ROOT_FOLDER` inside `DRIVE_FOLDER_ID`, then mirrors all subfolders under it.
+- Empty local folders are created on Drive too, so the hierarchy stays aligned.
 - If you stop the script and run it again, completed files are skipped and interrupted uploads resume from the saved checkpoint.
 - Duplicate Drive files are skipped automatically.

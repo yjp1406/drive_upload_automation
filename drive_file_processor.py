@@ -8,8 +8,8 @@ Supported extensions:
 
 The script:
     1. Recursively scans a root folder.
-    2. Renames each supported file based on its folder hierarchy.
-    3. Uploads files individually to a Google Drive folder.
+    2. Mirrors the local folder hierarchy in Google Drive.
+    3. Uploads each supported file into the matching Drive folder.
     4. Grants public view permission.
     5. Writes an Excel index of uploaded files.
 
@@ -45,6 +45,7 @@ from googleapiclient.http import HttpRequest, MediaFileUpload
 
 SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".mp4"}
 SCOPES = ["https://www.googleapis.com/auth/drive"]
+DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 DEFAULT_CREDENTIALS_FILE = "credentials.json"
 DEFAULT_TOKEN_FILE = "token.pickle"
 DEFAULT_OUTPUT_FILE = "uploaded_files.xlsx"
@@ -126,13 +127,29 @@ class UploadTracker:
     def ensure_records(self, files: Sequence[Path]) -> None:
         for file_path in files:
             source_path = str(file_path.relative_to(self.root_folder))
+            file_name = drive_file_name(file_path)
             if source_path not in self.records:
                 self.records[source_path] = UploadRecord(
                     source_path=source_path,
-                    renamed_file_name=rename_file(self.root_folder, file_path),
+                    renamed_file_name=file_name,
                 )
             else:
-                self.records[source_path].renamed_file_name = rename_file(self.root_folder, file_path)
+                record = self.records[source_path]
+                if record.renamed_file_name != file_name:
+                    record.renamed_file_name = file_name
+                    if record.status in {
+                        STATUS_PENDING,
+                        STATUS_UPLOADING,
+                        STATUS_FAILED,
+                        STATUS_PERMISSION_FAILED,
+                        STATUS_PAUSED,
+                    }:
+                        record.status = STATUS_PENDING
+                        record.progress = "0%"
+                        record.error = ""
+                        record.drive_file_id = ""
+                        record.drive_link = ""
+                        record.resumable_request_json = ""
 
     def get(self, file_path: Path) -> UploadRecord:
         source_path = str(file_path.relative_to(self.root_folder))
@@ -289,10 +306,8 @@ def iter_supported_files(root_folder: Path) -> Iterator[Path]:
                 yield candidate
 
 
-def rename_file(root_folder: Path, file_path: Path) -> str:
-    relative_path = file_path.relative_to(root_folder)
-    parts = [root_folder.name, *relative_path.parts[:-1], file_path.name]
-    return "_".join(parts)
+def drive_file_name(file_path: Path) -> str:
+    return file_path.name
 
 
 def build_drive_service(creds: Credentials):
@@ -307,9 +322,82 @@ def escape_drive_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def find_existing_drive_file(service, drive_folder_id: str, renamed_file_name: str) -> str | None:
+def find_existing_drive_folder(service, parent_folder_id: str, folder_name: str) -> str | None:
     query = (
-        f"name = '{escape_drive_query_value(renamed_file_name)}' "
+        f"name = '{escape_drive_query_value(folder_name)}' "
+        f"and mimeType = '{DRIVE_FOLDER_MIME_TYPE}' "
+        f"and '{escape_drive_query_value(parent_folder_id)}' in parents "
+        "and trashed = false"
+    )
+    response = service.files().list(
+        q=query,
+        spaces="drive",
+        pageSize=10,
+        fields="files(id, name)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    folders = response.get("files", [])
+    if not folders:
+        return None
+    if len(folders) > 1:
+        logging.warning(
+            "Multiple Drive folders matched %s in parent %s; using the first one",
+            folder_name,
+            parent_folder_id,
+        )
+    return folders[0]["id"]
+
+
+def create_drive_folder(service, parent_folder_id: str, folder_name: str) -> str:
+    response = service.files().create(
+        body={
+            "name": folder_name,
+            "mimeType": DRIVE_FOLDER_MIME_TYPE,
+            "parents": [parent_folder_id],
+        },
+        fields="id, name",
+        supportsAllDrives=True,
+    ).execute()
+    return response["id"]
+
+
+def ensure_drive_folder(service, parent_folder_id: str, folder_name: str) -> str:
+    existing_folder_id = find_existing_drive_folder(service, parent_folder_id, folder_name)
+    if existing_folder_id:
+        return existing_folder_id
+    return create_drive_folder(service, parent_folder_id, folder_name)
+
+
+def ensure_drive_folder_path(
+    service,
+    drive_root_folder_id: str,
+    root_folder_name: str,
+    relative_folder_path: Path,
+    folder_cache: dict[tuple[str, ...], str],
+) -> str:
+    current_key: tuple[str, ...] = ()
+    if current_key not in folder_cache:
+        folder_cache[current_key] = ensure_drive_folder(service, drive_root_folder_id, root_folder_name)
+
+    current_folder_id = folder_cache[current_key]
+    if relative_folder_path == Path("."):
+        return current_folder_id
+
+    for part in relative_folder_path.parts:
+        if part == ".":
+            continue
+        current_key = (*current_key, part)
+        if current_key not in folder_cache:
+            folder_cache[current_key] = ensure_drive_folder(service, current_folder_id, part)
+        current_folder_id = folder_cache[current_key]
+
+    return current_folder_id
+
+
+def find_existing_drive_file(service, drive_folder_id: str, file_name: str) -> str | None:
+    query = (
+        f"name = '{escape_drive_query_value(file_name)}' "
         f"and '{escape_drive_query_value(drive_folder_id)}' in parents "
         "and trashed = false"
     )
@@ -327,7 +415,7 @@ def find_existing_drive_file(service, drive_folder_id: str, renamed_file_name: s
     if len(files) > 1:
         logging.warning(
             "Multiple Drive files matched %s in folder %s; using the first one",
-            renamed_file_name,
+            file_name,
             drive_folder_id,
         )
     return files[0]["id"]
@@ -336,12 +424,12 @@ def find_existing_drive_file(service, drive_folder_id: str, renamed_file_name: s
 def build_upload_request(
     service,
     file_path: Path,
-    renamed_file_name: str,
+    file_name: str,
     drive_folder_id: str,
     chunk_size: int,
 ):
     metadata = {
-        "name": renamed_file_name,
+        "name": file_name,
         "parents": [drive_folder_id],
     }
     mimetype = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
@@ -396,7 +484,7 @@ def upload_or_resume_file(
     fresh_request = build_upload_request(
         service=service,
         file_path=file_path,
-        renamed_file_name=record.renamed_file_name,
+        file_name=record.renamed_file_name,
         drive_folder_id=drive_folder_id,
         chunk_size=chunk_size,
     )
@@ -562,15 +650,34 @@ def process_files(
     tracker.ensure_records(files)
     tracker.flush()
 
+    folder_cache: dict[tuple[str, ...], str] = {}
+    for current_root, _, _ in os.walk(root_folder):
+        current_root_path = Path(current_root)
+        relative_folder_path = current_root_path.relative_to(root_folder)
+        ensure_drive_folder_path(
+            service=service,
+            drive_root_folder_id=drive_folder_id,
+            root_folder_name=root_folder.name,
+            relative_folder_path=relative_folder_path,
+            folder_cache=folder_cache,
+        )
+
     try:
         for file_path in files:
             record = tracker.get(file_path)
+            destination_folder_id = ensure_drive_folder_path(
+                service=service,
+                drive_root_folder_id=drive_folder_id,
+                root_folder_name=root_folder.name,
+                relative_folder_path=file_path.parent.relative_to(root_folder),
+                folder_cache=folder_cache,
+            )
             upload_or_resume_file(
                 service=service,
                 tracker=tracker,
                 record=record,
                 file_path=file_path,
-                drive_folder_id=drive_folder_id,
+                drive_folder_id=destination_folder_id,
                 chunk_size=chunk_size,
             )
     except KeyboardInterrupt:
