@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+*.log
+token.pickle
+uploaded_files.xlsx
+credentials.json
+.env
+upload_state.json
