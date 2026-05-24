@@ -4,6 +4,7 @@ Supported extensions:
     - .pdf
     - .jpg
     - .jpeg
+    - .png
     - .mp4
 
 The script:
@@ -24,6 +25,7 @@ import mimetypes
 import logging
 import os
 import pickle
+import socket
 import time
 import pytz
 import dotenv
@@ -37,13 +39,15 @@ dotenv.load_dotenv()
 
 import pandas as pd
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import HttpRequest, MediaFileUpload
+from httplib2 import HttpLib2Error
 
-SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".mp4"}
+SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".mp4"}
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 DEFAULT_CREDENTIALS_FILE = "credentials.json"
@@ -53,6 +57,7 @@ DEFAULT_LOG_FILE = "upload.log"
 DEFAULT_ERROR_LOG_FILE = "upload_errors.log"
 DEFAULT_STATE_FILE = "upload_state.json"
 DEFAULT_CHUNK_SIZE = 10 * 1024 * 1024
+UI_EVENT_PREFIX = "UI_EVENT "
 
 ERROR_LOGGER = logging.getLogger("upload_errors")
 
@@ -64,6 +69,7 @@ STATUS_DUPLICATE = "duplicate"
 STATUS_FAILED = "failed"
 STATUS_PERMISSION_FAILED = "permission_failed"
 STATUS_PAUSED = "paused"
+STATUS_WAITING = "waiting_for_connection"
 
 
 @dataclass
@@ -192,6 +198,37 @@ def ist_now() -> str:
     return datetime.now(ist).isoformat(timespec="seconds")
 
 
+def emit_ui_event(event_type: str, **payload) -> None:
+    if os.environ.get("UI_PROGRESS") != "1":
+        return
+    message = {"type": event_type, **payload}
+    print(f"{UI_EVENT_PREFIX}{json.dumps(message, separators=(',', ':'))}", flush=True)
+
+
+def is_transient_connection_error(exc: Exception) -> bool:
+    if isinstance(exc, (HttpLib2Error, TimeoutError, socket.timeout, socket.gaierror, ConnectionError, OSError)):
+        return True
+    message = str(exc).lower()
+    transient_markers = [
+        "connection reset",
+        "connection aborted",
+        "broken pipe",
+        "timed out",
+        "temporary failure in name resolution",
+        "network is unreachable",
+        "connection refused",
+        "dns",
+        "name or service not known",
+        "failed to establish a new connection",
+        "remote end closed connection",
+    ]
+    return any(marker in message for marker in transient_markers)
+
+
+def is_transient_http_error(exc: HttpError) -> bool:
+    return getattr(exc.resp, "status", None) in {429, 500, 502, 503, 504}
+
+
 def configure_logging(log_file: Path, error_log_file: Path) -> None:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     error_log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -274,15 +311,26 @@ def parse_args() -> argparse.Namespace:
 def load_credentials(credentials_file: Path, token_file: Path) -> Credentials:
     creds: Credentials | None = None
     if token_file.exists():
-        with token_file.open("rb") as fh:
-            creds = pickle.load(fh)
+        try:
+            with token_file.open("rb") as fh:
+                creds = pickle.load(fh)
+        except Exception:
+            logging.exception("Cached token file %s is unreadable; starting fresh", token_file)
+            creds = None
 
     if creds and creds.valid:
         return creds
 
     if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    else:
+        try:
+            creds.refresh(Request())
+        except RefreshError as exc:
+            logging.warning("Saved token was rejected by Google (%s); re-authenticating", exc)
+            creds = None
+            if token_file.exists():
+                token_file.unlink()
+
+    if creds is None or not creds.valid:
         flow = InstalledAppFlow.from_client_secrets_file(str(credentials_file), SCOPES)
         creds = flow.run_local_server(port=0)
 
@@ -468,7 +516,52 @@ def upload_or_resume_file(
         tracker.flush()
         return
 
-    existing_file_id = find_existing_drive_file(service, drive_folder_id, record.renamed_file_name)
+    duplicate_backoff_seconds = 5
+    while True:
+        try:
+            existing_file_id = find_existing_drive_file(service, drive_folder_id, record.renamed_file_name)
+            break
+        except HttpError as exc:
+            if is_transient_http_error(exc):
+                logging.warning(
+                    "Drive lookup failed while checking duplicates for %s. Waiting %s seconds before retrying.",
+                    file_path,
+                    duplicate_backoff_seconds,
+                )
+                ERROR_LOGGER.error(
+                    "Drive lookup failed while checking duplicates for %s",
+                    file_path,
+                    exc_info=True,
+                )
+                record.status = STATUS_WAITING
+                record.error = f"Waiting for connection: {exc}"
+                record.updated_at = ist_now()
+                tracker.flush()
+                time.sleep(duplicate_backoff_seconds)
+                duplicate_backoff_seconds = min(duplicate_backoff_seconds * 2, 60)
+                continue
+            raise
+        except Exception as exc:
+            if is_transient_connection_error(exc):
+                logging.warning(
+                    "Connection lost while checking duplicates for %s. Waiting %s seconds before retrying.",
+                    file_path,
+                    duplicate_backoff_seconds,
+                )
+                ERROR_LOGGER.error(
+                    "Connection lost while checking duplicates for %s",
+                    file_path,
+                    exc_info=True,
+                )
+                record.status = STATUS_WAITING
+                record.error = f"Waiting for connection: {exc}"
+                record.updated_at = ist_now()
+                tracker.flush()
+                time.sleep(duplicate_backoff_seconds)
+                duplicate_backoff_seconds = min(duplicate_backoff_seconds * 2, 60)
+                continue
+            raise
+
     if existing_file_id:
         record.status = STATUS_DUPLICATE
         record.drive_file_id = existing_file_id
@@ -504,6 +597,7 @@ def upload_or_resume_file(
     tracker.flush()
 
     response = None
+    network_backoff_seconds = 5
     try:
         while response is None:
             try:
@@ -535,12 +629,43 @@ def upload_or_resume_file(
                     )
                     return
                 raise
+            except Exception as exc:
+                if is_transient_connection_error(exc):
+                    logging.warning(
+                        "Connection lost while uploading %s. Waiting %s seconds before retrying.",
+                        file_path,
+                        network_backoff_seconds,
+                    )
+                    ERROR_LOGGER.error(
+                        "Connection lost while uploading %s; will resume when network returns",
+                        file_path,
+                        exc_info=True,
+                    )
+                    record.status = STATUS_WAITING
+                    record.error = f"Waiting for connection: {exc}"
+                    record.resumable_request_json = request.to_json()
+                    record.updated_at = ist_now()
+                    tracker.flush()
+                    emit_ui_event(
+                        "upload_waiting",
+                        file=record.source_path,
+                        status=record.status,
+                        progress=record.progress,
+                        message=record.error,
+                    )
+                    time.sleep(network_backoff_seconds)
+                    network_backoff_seconds = min(network_backoff_seconds * 2, 60)
+                    continue
+                raise
 
             if status is not None:
+                record.status = STATUS_UPLOADING
+                record.error = ""
                 record.progress = f"{int(status.progress() * 100)}%"
                 record.resumable_request_json = request.to_json()
                 record.updated_at = ist_now()
                 tracker.flush()
+                network_backoff_seconds = 5
 
         file_id = response["id"]
         record.drive_file_id = file_id
@@ -572,10 +697,9 @@ def make_file_public(
     service,
     file_id: str,
     file_path: Path,
-    max_attempts: int = 3,
 ) -> None:
-    last_error: Exception | None = None
-    for attempt in range(1, max_attempts + 1):
+    backoff_seconds = 5
+    while True:
         try:
             service.permissions().create(
                 fileId=file_id,
@@ -585,42 +709,39 @@ def make_file_public(
             ).execute()
             return
         except HttpError as exc:
-            last_error = exc
-            logging.warning(
-                "Permission update failed for %s on attempt %s/%s: %s",
-                file_path,
-                attempt,
-                max_attempts,
-                exc,
-            )
-            ERROR_LOGGER.error(
-                "Permission update failed for %s on attempt %s/%s",
-                file_path,
-                attempt,
-                max_attempts,
-                exc_info=True,
-            )
-            if attempt < max_attempts:
-                time.sleep(2 ** (attempt - 1))
+            if is_transient_http_error(exc):
+                logging.warning(
+                    "Permission update failed for %s. Waiting %s seconds before retrying.",
+                    file_path,
+                    backoff_seconds,
+                )
+                ERROR_LOGGER.error(
+                    "Permission update failed for %s; will retry after connection returns",
+                    file_path,
+                    exc_info=True,
+                )
+                time.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, 60)
+                continue
+            raise
         except Exception as exc:  # pragma: no cover - defensive guard
-            last_error = exc
-            logging.exception(
-                "Unexpected permission failure for %s on attempt %s/%s",
-                file_path,
-                attempt,
-                max_attempts,
-            )
-            ERROR_LOGGER.exception(
-                "Unexpected permission failure for %s on attempt %s/%s",
-                file_path,
-                attempt,
-                max_attempts,
-            )
-            if attempt < max_attempts:
-                time.sleep(2 ** (attempt - 1))
-
-    assert last_error is not None
-    raise last_error
+            if is_transient_connection_error(exc):
+                logging.warning(
+                    "Connection lost while updating permissions for %s. Waiting %s seconds before retrying.",
+                    file_path,
+                    backoff_seconds,
+                )
+                ERROR_LOGGER.error(
+                    "Connection lost while updating permissions for %s; will retry after connection returns",
+                    file_path,
+                    exc_info=True,
+                )
+                time.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, 60)
+                continue
+            logging.exception("Unexpected permission failure for %s", file_path)
+            ERROR_LOGGER.exception("Unexpected permission failure for %s", file_path)
+            raise
 
 
 def process_files(
@@ -649,6 +770,7 @@ def process_files(
     tracker = UploadTracker(root_folder=root_folder, output_file=output_file, state_file=state_file)
     tracker.ensure_records(files)
     tracker.flush()
+    emit_ui_event("run_started", scanned=len(files))
 
     folder_cache: dict[tuple[str, ...], str] = {}
     for current_root, _, _ in os.walk(root_folder):
@@ -680,13 +802,34 @@ def process_files(
                 drive_folder_id=destination_folder_id,
                 chunk_size=chunk_size,
             )
+            emit_ui_event(
+                "file_complete",
+                source_path=record.source_path,
+                status=record.status,
+                drive_link=record.drive_link,
+            )
     except KeyboardInterrupt:
         logging.warning("Interrupted by user; progress has been saved.")
+        emit_ui_event("run_interrupted")
         tracker.flush()
         return 130
+    except Exception as exc:
+        emit_ui_event("run_failed", error=str(exc))
+        raise
 
     tracker.flush()
     uploaded_count = sum(1 for record in tracker.records.values() if record.status == STATUS_UPLOADED)
+    duplicate_count = sum(1 for record in tracker.records.values() if record.status == STATUS_DUPLICATE)
+    failed_count = sum(
+        1 for record in tracker.records.values() if record.status in {STATUS_FAILED, STATUS_PERMISSION_FAILED}
+    )
+    emit_ui_event(
+        "run_completed",
+        scanned=len(files),
+        uploaded=uploaded_count,
+        duplicates=duplicate_count,
+        failed=failed_count,
+    )
     logging.info(
         "Completed. Scanned %s supported files, uploaded %s successfully, report written to %s",
         len(files),
