@@ -3,5 +3,5 @@ google-auth
 google-auth-oauthlib
 pandas
 openpyxl
-dotenv
+python-dotenv
 pytz

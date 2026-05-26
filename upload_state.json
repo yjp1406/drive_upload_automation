@@ -1,0 +1,82 @@
+{
+  "root_folder": "/home/patel-yagnesh/Documents/projects/python-automation/TestRoot",
+  "records": [
+    {
+      "source_path": "02. The 7 Habits of Highly Effective People.pdf",
+      "renamed_file_name": "02. The 7 Habits of Highly Effective People.pdf",
+      "status": "uploaded",
+      "progress": "100%",
+      "drive_link": "https://drive.google.com/file/d/1Le7cT0hG3_c3BJXFrVSaz_87jPtuMthk/view",
+      "drive_file_id": "1Le7cT0hG3_c3BJXFrVSaz_87jPtuMthk",
+      "error": "",
+      "updated_at": "2026-05-24T10:14:19+05:30",
+      "resumable_request_json": ""
+    },
+    {
+      "source_path": "sabha_video.mp4",
+      "renamed_file_name": "sabha_video.mp4",
+      "status": "uploaded",
+      "progress": "100%",
+      "drive_link": "https://drive.google.com/file/d/1YHbhK4VXRQDlXkaqF6bAWOF8pLCIEvqS/view",
+      "drive_file_id": "1YHbhK4VXRQDlXkaqF6bAWOF8pLCIEvqS",
+      "error": "",
+      "updated_at": "2026-05-24T10:14:33+05:30",
+      "resumable_request_json": ""
+    },
+    {
+      "source_path": "A/B/Canoniccal.pdf",
+      "renamed_file_name": "Canoniccal.pdf",
+      "status": "uploaded",
+      "progress": "100%",
+      "drive_link": "https://drive.google.com/file/d/1bXNEUXDavDcwwHw407xWKbSmtQGyWf0S/view",
+      "drive_file_id": "1bXNEUXDavDcwwHw407xWKbSmtQGyWf0S",
+      "error": "",
+      "updated_at": "2026-05-24T10:14:37+05:30",
+      "resumable_request_json": ""
+    },
+    {
+      "source_path": "A/B/D/Canoniccal.pdf",
+      "renamed_file_name": "Canoniccal.pdf",
+      "status": "uploaded",
+      "progress": "100%",
+      "drive_link": "https://drive.google.com/file/d/1uLYydHwCVZbHdfaa3Q4Nh3rbjwp_CmK1/view",
+      "drive_file_id": "1uLYydHwCVZbHdfaa3Q4Nh3rbjwp_CmK1",
+      "error": "",
+      "updated_at": "2026-05-24T10:14:43+05:30",
+      "resumable_request_json": ""
+    },
+    {
+      "source_path": "A/B/D/decoder-yagnesh.png",
+      "renamed_file_name": "decoder-yagnesh.png",
+      "status": "uploaded",
+      "progress": "100%",
+      "drive_link": "https://drive.google.com/file/d/1x1Tui7Sh5pdLxYq0BF3XIDcS1r0iUtaR/view",
+      "drive_file_id": "1x1Tui7Sh5pdLxYq0BF3XIDcS1r0iUtaR",
+      "error": "",
+      "updated_at": "2026-05-24T10:15:48+05:30",
+      "resumable_request_json": ""
+    },
+    {
+      "source_path": "E/02. The 7 Habits of Highly Effective People.pdf",
+      "renamed_file_name": "02. The 7 Habits of Highly Effective People.pdf",
+      "status": "uploaded",
+      "progress": "100%",
+      "drive_link": "https://drive.google.com/file/d/1DbBrlZwxrRKbH_j9EQlWPYxLLsgMX3j9/view",
+      "drive_file_id": "1DbBrlZwxrRKbH_j9EQlWPYxLLsgMX3j9",
+      "error": "",
+      "updated_at": "2026-05-24T10:15:54+05:30",
+      "resumable_request_json": ""
+    },
+    {
+      "source_path": "E/The_Diplomat_2025_Hindi_Full_Movie_1080p_WEB-DL_(FilmyZilla.vin) (1).mp4",
+      "renamed_file_name": "The_Diplomat_2025_Hindi_Full_Movie_1080p_WEB-DL_(FilmyZilla.vin) (1).mp4",
+      "status": "uploading",
+      "progress": "3%",
+      "drive_link": "",
+      "drive_file_id": "",
+      "error": "",
+      "updated_at": "2026-05-24T10:37:59+05:30",
+      "resumable_request_json": "{\"uri\": \"https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+name&supportsAllDrives=true&alt=json&uploadType=resumable\", \"method\": \"POST\", \"body\": \"{\\\"name\\\": \\\"The_Diplomat_2025_Hindi_Full_Movie_1080p_WEB-DL_(FilmyZilla.vin) (1).mp4\\\", \\\"parents\\\": [\\\"1yRt0jaG-xh-0jQRrtpXkMS2U960HNlXT\\\"]}\", \"headers\": {\"accept\": \"application/json\", \"accept-encoding\": \"gzip, deflate\", \"user-agent\": \"(gzip)\", \"x-goog-api-client\": \"gdcl/2.195.0 gl-python/3.12.3\", \"content-type\": \"application/json\"}, \"methodId\": \"drive.files.create\", \"resumable\": \"{\\\"_filename\\\": \\\"/home/patel-yagnesh/Documents/projects/python-automation/TestRoot/E/The_Diplomat_2025_Hindi_Full_Movie_1080p_WEB-DL_(FilmyZilla.vin) (1).mp4\\\", \\\"_mimetype\\\": \\\"video/mp4\\\", \\\"_chunksize\\\": 10485760, \\\"_resumable\\\": true, \\\"_size\\\": 1316189753, \\\"_class\\\": \\\"MediaFileUpload\\\", \\\"_module\\\": \\\"googleapiclient.http\\\"}\", \"response_callbacks\": [], \"_in_error_state\": false, \"body_size\": 134, \"resumable_uri\": \"https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+name&supportsAllDrives=true&alt=json&uploadType=resumable&upload_id=AAVLpEgqvs1nCXHuLjVEP7Rzkm4z-IrtMHFUcC793Fksv_mimhsblSaOQORd5YPEYW4R9xFVVeF1Jka7urwI9m3r3nBGAatT9ZMme3VYGZ0vDQ&session_crd=AHSoBRU2s5wlqs75F0lq40p9xk1g-gnPXjGu-ZiJtHjlVHaPkPseJVQ9lec6lWPWZw1gqdnTtDgyaDqaJWI\", \"resumable_progress\": 52428800}"
+    }
+  ]
+}
