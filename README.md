@@ -20,39 +20,39 @@ This script recursively scans a local folder, mirrors the same folder hierarchy 
 
 ## Setup
 
-1. Install dependencies:
+1. Install Python 3.10 or newer.
+2. Create an OAuth client in Google Cloud and download the file as `credentials.json`.
+3. Place `credentials.json` in the project folder next to `drive_file_processor.py`.
+4. Install dependencies in a virtual environment.
 
-```bash
-pip install -r requirements.txt
+On Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-2. Create an OAuth client in Google Cloud and download the file as `credentials.json`.
-3. Place `credentials.json` next to the script.
-4. Create a `.env` file in the project root and add `ROOT_FOLDER`, `DRIVE_FOLDER_ID`, and `OUTPUT_FILE`.
+On macOS/Linux:
 
-If you want the desktop launcher, make sure your Python install includes `tkinter` as well. On many systems it is already included with Python.
-For the Windows launcher or exe, keep `credentials.json` in the same folder as the launcher or packaged executable.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+PowerShell note: `source .venv\Scripts\activate` does not work on Windows. Use `.\.venv\Scripts\Activate.ps1`, or skip activation and run `.venv\Scripts\python.exe` directly as shown above.
+
+If PowerShell blocks activation, run:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+The GUI uses `tkinter`. It is included with most standard Python installs.
 
 ## Usage
 
-The script loads `.env` automatically, so you only need to run:
-
-```bash
-python3 drive_file_processor.py
-```
-
-To use the desktop UI instead:
-
-```bash
-python3 drive_file_processor_gui.py
-```
-
-In the UI, fill in the root folder, Drive folder ID, and output file, then press `Run Upload`.
-Only those three fields are shown. The credentials, logs, state file, and chunk size use built-in defaults.
-
-On Windows, you can also double-click `launch_drive_upload.bat`.
-
-Example `.env`:
+For command-line usage, create a `.env` file in the project root:
 
 ```env
 ROOT_FOLDER="/path/to/Root"
@@ -60,6 +60,72 @@ DRIVE_FOLDER_ID="your_google_drive_folder_id"
 OUTPUT_FILE="uploaded_files.xlsx"
 UPLOAD_STATE_FILE="upload_state.json"
 ```
+
+Then run:
+
+```bash
+python3 drive_file_processor.py
+```
+
+On Windows PowerShell, use:
+
+```powershell
+.\.venv\Scripts\python.exe drive_file_processor.py
+```
+
+## GUI Usage
+
+Run the desktop UI directly:
+
+```bash
+python3 drive_file_processor_gui.py
+```
+
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe drive_file_processor_gui.py
+```
+
+In the UI, fill in the root folder, Drive folder ID, and output file, then press `Run Upload`.
+Only those three fields are shown. The credentials, logs, state file, and chunk size use built-in defaults.
+
+On Windows, you can also double-click `launch_drive_upload.bat`.
+
+The launcher first looks for Python in:
+
+- `.venv\Scripts\pythonw.exe`
+- `.venv\Scripts\python.exe`
+- global `pyw`
+- global `python`
+
+Because of this, install the dependencies into `.venv` before using the launcher.
+
+## Desktop Launcher
+
+You can keep `launch_drive_upload.bat` on the Desktop.
+
+Recommended setup:
+
+1. Keep the project folder in Downloads or another permanent location.
+2. Keep `drive_file_processor.py`, `drive_file_processor_gui.py`, `credentials.json`, `requirements.txt`, and `.venv` inside the project folder.
+3. Copy only `launch_drive_upload.bat` to the Desktop.
+4. Double-click the Desktop launcher.
+
+The launcher automatically checks these common project locations:
+
+- `%USERPROFILE%\Downloads\drive_upload_automation-main\drive_upload_automation-main\`
+- `%USERPROFILE%\Downloads\drive_upload_automation-main\`
+- `%USERPROFILE%\Desktop\drive_upload_automation-main\drive_upload_automation-main\`
+- `%USERPROFILE%\Desktop\drive_upload_automation-main\`
+
+If your project folder is somewhere else, set `DRIVE_UPLOAD_APP_DIR` once:
+
+```powershell
+setx DRIVE_UPLOAD_APP_DIR "C:\path\to\drive_upload_automation-main\drive_upload_automation-main"
+```
+
+After running `setx`, restart Windows Explorer, sign out/sign in, or reboot once so double-clicked Desktop launchers can see the new variable.
 
 Optional environment variables:
 
